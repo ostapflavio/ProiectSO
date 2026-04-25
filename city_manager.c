@@ -54,8 +54,10 @@ typedef struct {
     size_t conditions_count; 
 } Command; 
 
+
+// =============== COMMANDS ===============
 void add(Command* cmd) {
-	return; 
+    
 }
 
 void view(Command* cmd) {
@@ -74,33 +76,37 @@ void filter(Command* cmd) {
     return; 
 }
 
-void list(Command* cmd) {
+void view(Command* cmd) {
     size_t BUFFER_SIZE = 256;
 
 	char filename[BUFFER_SIZE]; 
-    size_t bytes_written = snprintf(filename, sizeof(filename), "%s/%s", line[6], "reports.dat"); 	
+    size_t bytes_written = snprintf(filename, sizeof(filename), "%s/%s", cmd->district_id, "reports.dat"); 	
     if(bytes_written >= BUFFER_SIZE) {
-
+        fprintf(stderr, "ERROR: name is too long!\n");
+        exit(EXIT_FAILURE);
     }
+
     int fd; 
 
 	if((fd = open(filename, O_RDONLY)) == -1) {
 		fprintf(stderr, "ERROR: you couldn't open the file!\n"); 
-		exit(EXIT_FAILURE); 
+        exit(EXIT_FAILURE); 
 	}
-
-	char buffer[BUFFER_SIZE]; 
-	size_t bytes_read;
-	while((bytes_read = read(fd, buffer, 256)) > 0) {
-		write(STDOUT_FILENO, buffer, bytes_read); 
+    
+    Report r; 
+	while(read(fd, &r, sizeof(Report) == sizeof(Report))) {
+        if(cmd->reports_id == r-)
+        printf("ID: %d, Value: %.2f, Time: %s\n", r.id, r.value, r.timestamp);
 	}
 
 	close(fd); 
 }
 
+// =============== HELPERS =============== 
+
 // high technical debt command, but it is what it is to keep single repsponsiblitiy 
 void (*detect_command(Command* cmd))(Command *) {	
-    switch (cmd_line->type)	{
+    switch (cmd->command) {
         case ADD:
             return add;
         case LIST:
@@ -163,6 +169,79 @@ Command parse_arguments(int argc, char** argv) {
         cmd.command = LIST;  
         strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
         cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
+   
+      }
+
+    else if(strcmp(argv[5], "--add") == 0) {
+        if(argc != 6) exit(EXIT_FAILURE);
+
+        cmd.command = ADD; 
+        strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
+        cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
+    }
+
+    else if(strcmp(argv[5], "--view") == 0) {
+        if(argc != 8) exit(EXIT_FAILURE)
+
+        cmd.command = VIEW;
+        strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
+        cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
+
+        char *endptr;
+        long val = strtol(argv[7], &endptr, 10):
+        if(endptr == argv[7]) {
+            fprintf(stderr, "ERROR: %s is not a valid number", argv[7]);
+            exit(EXIT_FAILURE);
+        }
+
+        if(errno == ERANGE || val > INT_MAX || val < INT_MIN) {
+            fprintf(stderr, "ERROR: severity value out of range!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        cmd.report_id = (int)val;
+    }
+
+    else if(strcmp(argv[5], "--remove_report") == 0) {
+        cmd.command = REMOVE_REPORT;
+        strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
+        cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
+
+        char *endptr;
+        long val = strtol(argv[7], &endptr, 10):
+        if(endptr == argv[7]) {
+            fprintf(stderr, "ERROR: %s is not a valid number", argv[7]);
+            exit(EXIT_FAILURE);
+        }
+
+        if(errno == ERANGE || val > INT_MAX || val < INT_MIN) {
+            fprintf(stderr, "ERROR: severity value out of range!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        cmd.report_id = (int)val;
+    }
+
+    else if(strcmp(argv[5], "--update_threshold") == 0) {
+        if(argc != 8) exit(EXIT_FAILURE);
+
+        cmd.command = UPDATE_THRESHOLD;
+        strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
+        cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
+
+        char *endptr;
+        long val = strtol(argv[7], &endptr, 10):
+        if(endptr == argv[7]) {
+            fprintf(stderr, "ERROR: %s is not a valid number", argv[7]);
+            exit(EXIT_FAILURE);
+        }
+
+        if(errno == ERANGE || val > INT_MAX || val < INT_MIN) {
+            fprintf(stderr, "ERROR: severity value out of range!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        cmd.severity = (int)val;
     }
 
     else if (strcmp(argv[5], "--filter") == 0) {
@@ -187,6 +266,10 @@ Command parse_arguments(int argc, char** argv) {
     return cmd; 
 }
 
+char* get_path_name(char district_id[], char filename[]) {
+
+}
+
 int main(int argc, char** argv) {
 	if(argc < 7) {
 		// write(stderr, "ERROR: you have not specified the role and the command!\n", 60); 
@@ -196,7 +279,7 @@ int main(int argc, char** argv) {
 
     Command cmd_line = parse_arguments(argc, argv)
 
-    void (*command)(char**) = detect_command(cmd_line);
+    void (*command)(Comand*) = detect_command(&cmd_line);
     if(command == NULL) {
         fprintf(stderr, "ERROR: unknown command!\n");
         exit(EXIT_FAILURE);
