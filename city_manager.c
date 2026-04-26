@@ -62,8 +62,14 @@ typedef struct {
     int severity;
 } Command; 
 
+// =============== PROTOTYPES ===============
+int get_next_report_id(char* path);
+void check_permissions(char path[], Role role, int access_type);
+void log_action(Command* cmd, char action[]);
+char* role_to_string(Role role);
 
 // =============== COMMANDS ===============
+// TODO: add logger
 void add(Command* cmd) {
     size_t BUFFER_SIZE = 256; 
 
@@ -76,9 +82,8 @@ void add(Command* cmd) {
     }
 
     struct stat stat_buff;  
-
     if(stat(path, &stat_buff) == -1) {
-        if(mkdir(directory, 0750) != 0) {
+        if(mkdir(path, 0750) != 0) {
             fprintf(stderr, "ERROR: couldn't create the directory!\n");
             exit(EXIT_FAILURE);
         }
@@ -86,21 +91,103 @@ void add(Command* cmd) {
         chmod(path, 0750);
     }
     
-    bytes_written = snprintf(path, sizeof(path), "%s\reports.dat", cmd->district_id);
+    bytes_written = snprintf(path, sizeof(path), "%s/reports.dat", cmd->district_id);
     if(bytes_written >= BUFFER_SIZE) {
         fprintf(stderr, "ERROR: overwrite!\n");
         exit(EXIT_FAILURE);
     }
+    check_permissions(cmd->district_id, cmd->role, ACCESS_WRITE);
+    check_permissions(path, cmd->role, ACCESS_WRITE);
 
+    Report r;
     int fd; 
-    if(stat(path, &stat_buff) == -1) {
-        fd = open(path, O_CREATE); 
+    int threshold; 
+
+    memset(&r, 0, sizeof(Report));
+
+    r.id = get_next_report_id(path);
+    strncpy(r.inspector, cmd->user, sizeof(r.inspector) - 1);
+    r.inspector[sizeof(r.inspector) - 1] = '\0';
+
+    printf("Latitude: ");
+    if(scanf("%lf", &r.latitude) != 1) {
+        fprintf(stderr, "ERROR: invalid latitude!\n");
+        exit(EXIT_FAILURE);
     }
 
-    else {
-        fd = open(path, O_RDONLY);
+    printf("Longitude: ");
+    if(scanf("%lf", &r.longitude) != 1) {
+        fprintf(stderr, "ERROR: invalid longitude!\n");
+        exit(EXIT_FAILURE);
     }
+
+    printf("Category (road/lighting/flooding/other): ");
+    if(scanf("%31s", r.category) != 1) {
+        fprintf(stderr, "ERROR: invalid category!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Severity level (1/2/3): ");
+    if(scanf("%d", &r.severity) != 1) {
+        fprintf(stderr, "ERROR: invalid severity!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(r.severity < 1 || r.severity > 3) {
+        fprintf(stderr, "ERROR: severity must be 1, 2, or 3!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // remove the remaining newline before fgets
+    int ch;
+    while((ch = getchar()) != '\n' && ch != EOF) {
+    }
+
+    printf("Description: ");
+    if(fgets(r.description, sizeof(r.description), stdin) == NULL) {
+        fprintf(stderr, "ERROR: invalid description!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    r.description[strcspn(r.description, "\n")] = '\0';
+    r.timestamp = time(NULL);
+
+    fd = open(path, O_WRONLY | O_APPEND);
+    if(fd == -1) {
+        if(errno == ENOENT) {
+            return 1;
+        }
+        perror("ERROR: couldn't open reports.dat");
+        exit(EXIT_FAILURE);
+    }
+
+    if(write(fd, &r, sizeof(Report)) != sizeof(Report)) {
+        perror("ERROR: couldn't write report");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+    chmod(path, 0664);
+
+    if(r.id == 1) {
+        snprintf(path, sizeof(path), "%s/district.cfg", cmd->district_id);
+        FILE* f = fopen(path, "w"); 
+
+        if(f != NULL) {
+            fprintf(f, "%d", 3);
+            fclose(f);
+            chmod(path, 0640);
+        }
+        else {
+            fprintf(stderr, "ERROR: Failed district.cfg!\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    log_action(cmd, "add");
 }
+
 
 void list(Command* cmd) {
     size_t BUFFER_SIZE = 256;
@@ -254,7 +341,7 @@ Command parse_arguments(int argc, char** argv) {
       }
 
     else if(strcmp(argv[5], "--add") == 0) {
-        if(argc != 6) exit(EXIT_FAILURE);
+        if(argc != 7) exit(EXIT_FAILURE);
 
         cmd.command = ADD; 
         strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
@@ -284,6 +371,7 @@ Command parse_arguments(int argc, char** argv) {
     }
 
     else if(strcmp(argv[5], "--remove_report") == 0) {
+        if(argc != 8) exit(EXIT_FAILURE);
         cmd.command = REMOVE_REPORT;
         strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
         cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
@@ -347,18 +435,36 @@ Command parse_arguments(int argc, char** argv) {
     return cmd; 
 }
 
-void get_path_name(char district_id[], char filename[]) {
+int get_next_report_id(char* path) {
+    int fd; 
+    Report r; 
+    size_t bytes_read; 
+    int max_id = 0; 
 
-}
+    fd = open(path, O_RDONLY);
+    if(fd == -1) {
+        if(errno == ENOENT) {
+            return 1;
+        }
 
-void ensure_district_exists(char district_id[]) {
-    int PATH_MAX = 256; 
-    char reports_path[PATH_MAX];
-    char cfg_path[PATH_MAX];
-    char log_path[PATH_MAX];
-    struct stat stat_buff; 
+        fprintf(stderr, "ERROR: couldn't open reports.dat");
+        exit(EXIT_FAILURE);
+    }
 
-    validat_district_name()
+    while((bytes_read = read(fd, &r, sizeof(Report))) == sizeof(Report)) {
+        if(r.id > max_id) {
+            max_id = r.id;
+        }
+    }
+
+    if(bytes_read == -1) {
+        fprintf(stderr, "ERROR: random error!\'n");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+    return max_id + 1;
 }
 
 void mode_to_string(mode_t mode, char output[]) {
@@ -403,7 +509,7 @@ void check_permissions(char path[], Role role, int access_type) {
     if(role == MANAGER) {
         read_bit = S_IRUSR;
         write_bit = S_IWUSR;
-        execit_bit = S_IXUSR;
+        exec_bit = S_IXUSR;
     }
     else if(role == INSPECTOR){
         read_bit = S_IRGRP; 
@@ -427,6 +533,60 @@ void check_permissions(char path[], Role role, int access_type) {
     }
 }
 
+
+void log_action(Command* cmd, char action[]) {
+    int BUFFER_SIZE = 256;
+    char path[BUFFER_SIZE];
+    char line[1024];
+    snprintf(path, sizeof(path), "%s/logged_district", cmd->district_id);
+
+    struct stat stat_buff; 
+    if(stat(path, &stat_buff) == -1) {
+        fprintf(stderr, "ERROR: stat failed!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(!(stat_buff.st_mode & S_IWUSR)) {
+        fprintf(stderr, "ERROR: logged_ditsr does not have manager write permission!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    check_permissions(path, cmd->role, ACCESS_WRITE);
+
+    int fd; 
+    char time_buffer[64];
+    time_t now; 
+    struct tm* time_info; 
+    now = time(NULL);
+    time_info = localtime(&now);
+    if(time_info != NULL) {
+        strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
+    }
+    else {
+        strncpy(time_buffer, "unknown", sizeof(time_buffer) - 1);
+        time_buffer[sizeof(time_buffer) - 1] = '\0';
+    }
+
+    int line_size = snprintf(line, sizeof(line), "%s role=%s user=%s action=%s\n", time_buffer, role_to_string(cmd->role), cmd->user, action);
+    if(line_size < 0 || (size_t)line_size >= sizeof(line)) {
+        fprintf(stderr, "ERROR: log line is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    fd = open(path, O_WRONLY | O_APPEND);
+    if(fd == -1) {
+        perror("ERROR: couldn't open log file");
+        exit(EXIT_FAILURE);
+    }
+
+    if(write(fd, line, strlen(line)) != (ssize_t)strlen(line)) {
+        perror("ERROR: couldn't write log");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+}
 int main(int argc, char** argv) {
 	if(argc < 7) {
 		// write(stderr, "ERROR: you have not specified the role and the command!\n", 60); 
