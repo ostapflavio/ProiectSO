@@ -4,6 +4,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <limits.h>
+#include <errno.h>
+#include <sys/stat.h>
+
+#define ACCESS_READ 4 
+#define ACCESS_WRITE 2 
+#define ACCESS_EXEC 1 
 
 typedef enum {
     MANAGER=100007, 
@@ -52,16 +59,82 @@ typedef struct {
     int report_id; 
     char** conditions; 
     size_t conditions_count; 
+    int severity;
 } Command; 
 
 
 // =============== COMMANDS ===============
 void add(Command* cmd) {
+    size_t BUFFER_SIZE = 256; 
+
+    char path[BUFFER_SIZE];
+    size_t bytes_written = snprintf(path, sizeof(path), "%s", cmd->district_id);
+
+    if(bytes_written >= BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: overwrite!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    struct stat stat_buff;  
+
+    if(stat(path, &stat_buff) == -1) {
+        if(mkdir(directory, 0750) != 0) {
+            fprintf(stderr, "ERROR: couldn't create the directory!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        chmod(path, 0750);
+    }
     
+    bytes_written = snprintf(path, sizeof(path), "%s\reports.dat", cmd->district_id);
+    if(bytes_written >= BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: overwrite!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    int fd; 
+    if(stat(path, &stat_buff) == -1) {
+        fd = open(path, O_CREATE); 
+    }
+
+    else {
+        fd = open(path, O_RDONLY);
+    }
 }
 
-void view(Command* cmd) {
-    return; 
+void list(Command* cmd) {
+    size_t BUFFER_SIZE = 256;
+
+	char filename[BUFFER_SIZE]; 
+    size_t bytes_written = snprintf(filename, sizeof(filename), "%s/%s", cmd->district_id, "reports.dat"); 	
+    if(bytes_written >= BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: name is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    int fd; 
+
+	if((fd = open(filename, O_RDONLY)) == -1) {
+		fprintf(stderr, "ERROR: you couldn't open the file!\n"); 
+        exit(EXIT_FAILURE); 
+	}
+    
+    Report r; 
+	while(read(fd, &r, sizeof(Report)) == sizeof(Report)) {
+        if(cmd->report_id == r.id) {
+            printf("id = %d \n", r.id);
+            printf("inspector = %s \n", r.inspector);
+            printf("lat = %f \n", r.latitude);
+            printf("long = %f \n", r.longitude);
+            printf("cat = %s \n", r.category);
+            printf("severity = %d \n", r.severity);
+            printf("timestamp = %lld \n", (long long)r.timestamp);
+        }
+            printf("description = %s \n", r.description);
+	}
+
+	close(fd); 
+
 }
 
 void remove_report(Command* cmd) {
@@ -94,9 +167,17 @@ void view(Command* cmd) {
 	}
     
     Report r; 
-	while(read(fd, &r, sizeof(Report) == sizeof(Report))) {
-        if(cmd->reports_id == r-)
-        printf("ID: %d, Value: %.2f, Time: %s\n", r.id, r.value, r.timestamp);
+	while(read(fd, &r, sizeof(Report)) == sizeof(Report)) {
+        if(cmd->report_id == r.id) {
+            printf("id = %d \n", r.id);
+            printf("inspector = %s \n", r.inspector);
+            printf("lat = %f \n", r.latitude);
+            printf("long = %f \n", r.longitude);
+            printf("cat = %s \n", r.category);
+            printf("severity = %d \n", r.severity);
+            printf("timestamp = %lld \n", (long long)r.timestamp);
+            printf("description = %s \n", r.description);
+        }
 	}
 
 	close(fd); 
@@ -105,7 +186,7 @@ void view(Command* cmd) {
 // =============== HELPERS =============== 
 
 // high technical debt command, but it is what it is to keep single repsponsiblitiy 
-void (*detect_command(Command* cmd))(Command *) {	
+void (*detect_command(Command* cmd))(Command *) {
     switch (cmd->command) {
         case ADD:
             return add;
@@ -137,7 +218,7 @@ Command parse_arguments(int argc, char** argv) {
     }
 
     // role
-    if(strcmp(argv[1], "--role") != 0)) {
+    if(strcmp(argv[1], "--role") != 0) {
         fprintf(stderr, "ERROR: missing --role\n");
         exit(EXIT_FAILURE);
     }
@@ -181,14 +262,14 @@ Command parse_arguments(int argc, char** argv) {
     }
 
     else if(strcmp(argv[5], "--view") == 0) {
-        if(argc != 8) exit(EXIT_FAILURE)
+        if(argc != 8) exit(EXIT_FAILURE);
 
         cmd.command = VIEW;
         strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
         cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
 
         char *endptr;
-        long val = strtol(argv[7], &endptr, 10):
+        long val = strtol(argv[7], &endptr, 10);
         if(endptr == argv[7]) {
             fprintf(stderr, "ERROR: %s is not a valid number", argv[7]);
             exit(EXIT_FAILURE);
@@ -208,7 +289,7 @@ Command parse_arguments(int argc, char** argv) {
         cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
 
         char *endptr;
-        long val = strtol(argv[7], &endptr, 10):
+        long val = strtol(argv[7], &endptr, 10);
         if(endptr == argv[7]) {
             fprintf(stderr, "ERROR: %s is not a valid number", argv[7]);
             exit(EXIT_FAILURE);
@@ -230,7 +311,7 @@ Command parse_arguments(int argc, char** argv) {
         cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
 
         char *endptr;
-        long val = strtol(argv[7], &endptr, 10):
+        long val = strtol(argv[7], &endptr, 10);
         if(endptr == argv[7]) {
             fprintf(stderr, "ERROR: %s is not a valid number", argv[7]);
             exit(EXIT_FAILURE);
@@ -266,8 +347,84 @@ Command parse_arguments(int argc, char** argv) {
     return cmd; 
 }
 
-char* get_path_name(char district_id[], char filename[]) {
+void get_path_name(char district_id[], char filename[]) {
 
+}
+
+void ensure_district_exists(char district_id[]) {
+    int PATH_MAX = 256; 
+    char reports_path[PATH_MAX];
+    char cfg_path[PATH_MAX];
+    char log_path[PATH_MAX];
+    struct stat stat_buff; 
+
+    validat_district_name()
+}
+
+void mode_to_string(mode_t mode, char output[]) {
+    output[0] = (mode & S_IRUSR) ? 'r' : '-';
+    output[1] = (mode & S_IWUSR) ? 'w' : '-';
+    output[2] = (mode & S_IXUSR) ? 'x' : '-';
+   
+    output[3] = (mode & S_IRGRP) ? 'r' : '-';
+    output[4] = (mode & S_IWGRP) ? 'w' : '-'; 
+    output[5] = (mode & S_IXGRP) ? 'x' : '-';
+   
+    output[6] = (mode & S_IROTH) ? 'r' : '-';
+    output[7] = (mode & S_IWOTH) ? 'w' : '-';
+    output[8] = (mode & S_IXOTH) ? 'x' : '-';
+    
+    output[9] = '\0';
+}
+
+char* role_to_string(Role role) {
+    if(role == MANAGER) {
+        return "manager";
+    }
+    else if(role == INSPECTOR) {
+        return "inspector";
+    }
+
+    return "other";
+}
+
+void check_permissions(char path[], Role role, int access_type) {
+    struct stat stat_buff; 
+    mode_t read_bit = S_IROTH; 
+    mode_t write_bit = S_IWOTH; 
+    mode_t exec_bit  = S_IXOTH; 
+    char permissions[10];
+
+    if(stat(path, &stat_buff) == 1) {
+        fprintf(stderr, "ERROR: couldn't open the file/directory!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(role == MANAGER) {
+        read_bit = S_IRUSR;
+        write_bit = S_IWUSR;
+        execit_bit = S_IXUSR;
+    }
+    else if(role == INSPECTOR){
+        read_bit = S_IRGRP; 
+        write_bit = S_IWGRP; 
+        exec_bit = S_IXGRP; 
+    }
+
+    if((access_type & ACCESS_READ) && !(stat_buff.st_mode & read_bit)) {
+        fprintf(stderr, "ERROR: role %s cannot execute read command on that file / directory with path=%s!\n", role_to_string(role), path);
+        exit(EXIT_FAILURE);
+    }
+
+    if((access_type & ACCESS_WRITE) && !(stat_buff.st_mode & write_bit)) {
+        fprintf(stderr, "ERROR: role %s cannot execute write command on that file / directory with path=%s!\n", role_to_string(role), path);
+        exit(EXIT_FAILURE);
+    }
+
+    if((access_type & ACCESS_EXEC) && !(stat_buff.st_mode & exec_bit)) {
+        fprintf(stderr, "ERROR: role %s cannot execute exec command on that file / directory with path=%s!\n", role_to_string(role), path);
+        exit(EXIT_FAILURE);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -277,14 +434,14 @@ int main(int argc, char** argv) {
 		exit(EXIT_FAILURE);
 	}
 
-    Command cmd_line = parse_arguments(argc, argv)
+    Command cmd_line = parse_arguments(argc, argv);
 
-    void (*command)(Comand*) = detect_command(&cmd_line);
+    void (*command)(Command*) = detect_command(&cmd_line);
     if(command == NULL) {
         fprintf(stderr, "ERROR: unknown command!\n");
         exit(EXIT_FAILURE);
     }
 
-	command(cmd_line); 
+	command(&cmd_line); 
 	return 0; 
 }
