@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 700
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -7,11 +8,11 @@
 #include <limits.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 #define ACCESS_READ 4 
 #define ACCESS_WRITE 2 
 #define ACCESS_EXEC 1 
-#define _XOPEN_SOURCE 700
 
 typedef enum {
     MANAGER=100007, 
@@ -72,6 +73,9 @@ int parse_condition(const char* input, char field[], char op[], char value[]);
 int match_condition(Report* r, const char field[], const char op[], const char value[]);
 int compare_int(long long left, const char op[], long long right);
 int compare_string(const char left[], const char op[], const char right[]);
+void mode_to_string(mode_t mode, char output[]);
+void scan_active_report_links(void);
+void ensure_active_reports_symlink(const char district_id[]);
 
 // =============== COMMANDS ===============
 void add(Command* cmd) {
@@ -256,37 +260,87 @@ void add(Command* cmd) {
 
 void list(Command* cmd) {
     size_t BUFFER_SIZE = 256;
+    char filename[BUFFER_SIZE];
+    size_t bytes_written;
+    int fd;
+    Report r;
+    ssize_t bytes_read;
+    struct stat stat_buff;
+    char permissions[10];
+    char time_buffer[64];
+    struct tm* time_info;
+    int found_any = 0;
 
-	char filename[BUFFER_SIZE]; 
-    size_t bytes_written = snprintf(filename, sizeof(filename), "%s/%s", cmd->district_id, "reports.dat"); 	
+    bytes_written = snprintf(filename, sizeof(filename), "%s/%s", cmd->district_id, "reports.dat");
     if(bytes_written >= BUFFER_SIZE) {
         fprintf(stderr, "ERROR: name is too long!\n");
         exit(EXIT_FAILURE);
     }
 
-    int fd; 
+    check_permissions(cmd->district_id, cmd->role, ACCESS_EXEC);
+    check_permissions(filename, cmd->role, ACCESS_READ);
 
-	if((fd = open(filename, O_RDONLY)) == -1) {
-		fprintf(stderr, "ERROR: you couldn't open the file!\n"); 
-        exit(EXIT_FAILURE); 
-	}
-    
-    Report r; 
-	while(read(fd, &r, sizeof(Report)) == sizeof(Report)) {
-        if(cmd->report_id == r.id) {
-            printf("id = %d \n", r.id);
-            printf("inspector = %s \n", r.inspector);
-            printf("lat = %f \n", r.latitude);
-            printf("long = %f \n", r.longitude);
-            printf("cat = %s \n", r.category);
-            printf("severity = %d \n", r.severity);
-            printf("timestamp = %lld \n", (long long)r.timestamp);
-        }
-            printf("description = %s \n", r.description);
-	}
+    if(stat(filename, &stat_buff) == -1) {
+        perror("ERROR: stat failed for reports.dat");
+        exit(EXIT_FAILURE);
+    }
 
-	close(fd); 
+    mode_to_string(stat_buff.st_mode, permissions);
 
+    time_info = localtime(&stat_buff.st_mtime);
+    if(time_info != NULL) {
+        strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
+    }
+    else {
+        strncpy(time_buffer, "unknown", sizeof(time_buffer) - 1);
+        time_buffer[sizeof(time_buffer) - 1] = '\0';
+    }
+
+    printf("reports.dat permissions = %s\n", permissions);
+    printf("reports.dat size = %lld bytes\n", (long long)stat_buff.st_size);
+    printf("reports.dat last modified = %s\n", time_buffer);
+    printf("-----------------------------\n");
+
+    if((fd = open(filename, O_RDONLY)) == -1) {
+        fprintf(stderr, "ERROR: you couldn't open the file!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    while((bytes_read = read(fd, &r, sizeof(Report))) == sizeof(Report)) {
+        found_any = 1;
+
+        printf("id = %d \n", r.id);
+        printf("inspector = %s \n", r.inspector);
+        printf("lat = %f \n", r.latitude);
+        printf("long = %f \n", r.longitude);
+        printf("cat = %s \n", r.category);
+        printf("severity = %d \n", r.severity);
+        printf("timestamp = %lld \n", (long long)r.timestamp);
+        printf("description = %s \n", r.description);
+        printf("-----------------------------\n");
+    }
+
+    if(bytes_read == -1) {
+        perror("ERROR: couldn't read reports.dat");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    if(bytes_read != 0) {
+        fprintf(stderr, "ERROR: reports.dat contains an incomplete report!\n");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    if(!found_any) {
+        printf("No reports found.\n");
+    }
+
+    close(fd);
+
+    if(cmd->role == MANAGER) {
+        log_action(cmd, "list");
+    }
 }
 
 void remove_report(Command* cmd) {
@@ -512,24 +566,31 @@ void filter(Command* cmd) {
 
 void view(Command* cmd) {
     size_t BUFFER_SIZE = 256;
+    char filename[BUFFER_SIZE];
+    size_t bytes_written;
+    int fd;
+    Report r;
+    ssize_t bytes_read;
+    int found = 0;
 
-	char filename[BUFFER_SIZE]; 
-    size_t bytes_written = snprintf(filename, sizeof(filename), "%s/%s", cmd->district_id, "reports.dat"); 	
+    bytes_written = snprintf(filename, sizeof(filename), "%s/%s", cmd->district_id, "reports.dat");
     if(bytes_written >= BUFFER_SIZE) {
         fprintf(stderr, "ERROR: name is too long!\n");
         exit(EXIT_FAILURE);
     }
 
-    int fd; 
+    check_permissions(cmd->district_id, cmd->role, ACCESS_EXEC);
+    check_permissions(filename, cmd->role, ACCESS_READ);
 
-	if((fd = open(filename, O_RDONLY)) == -1) {
-		fprintf(stderr, "ERROR: you couldn't open the file!\n"); 
-        exit(EXIT_FAILURE); 
-	}
-    
-    Report r; 
-	while(read(fd, &r, sizeof(Report)) == sizeof(Report)) {
+    if((fd = open(filename, O_RDONLY)) == -1) {
+        fprintf(stderr, "ERROR: you couldn't open the file!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    while((bytes_read = read(fd, &r, sizeof(Report))) == sizeof(Report)) {
         if(cmd->report_id == r.id) {
+            found = 1;
+
             printf("id = %d \n", r.id);
             printf("inspector = %s \n", r.inspector);
             printf("lat = %f \n", r.latitude);
@@ -538,12 +599,33 @@ void view(Command* cmd) {
             printf("severity = %d \n", r.severity);
             printf("timestamp = %lld \n", (long long)r.timestamp);
             printf("description = %s \n", r.description);
+            break;
         }
-	}
+    }
 
-	close(fd); 
+    if(bytes_read == -1) {
+        perror("ERROR: couldn't read reports.dat");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    if(bytes_read != 0 && !found) {
+        fprintf(stderr, "ERROR: reports.dat contains an incomplete report!\n");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+
+    if(!found) {
+        fprintf(stderr, "ERROR: report with id %d was not found!\n", cmd->report_id);
+        exit(EXIT_FAILURE);
+    }
+
+    if(cmd->role == MANAGER) {
+        log_action(cmd, "view");
+    }
 }
-
 // =============== HELPERS =============== 
 
 // high technical debt command, but it is what it is to keep single repsponsiblitiy 
@@ -712,7 +794,7 @@ Command parse_arguments(int argc, char** argv) {
 int get_next_report_id(char* path) {
     int fd; 
     Report r; 
-    size_t bytes_read; 
+    ssize_t bytes_read; 
     int max_id = 0; 
 
     fd = open(path, O_RDONLY);
@@ -1074,6 +1156,7 @@ void ensure_active_reports_symlink(const char district_id[]) {
 }
 
 int main(int argc, char** argv) {
+    scan_active_report_links();
 	if(argc < 7) {
 		// write(stderr, "ERROR: you have not specified the role and the command!\n", 60); 
 		fprintf(stderr, "ERROR: not enough arguments!");  
