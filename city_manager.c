@@ -11,6 +11,7 @@
 #define ACCESS_READ 4 
 #define ACCESS_WRITE 2 
 #define ACCESS_EXEC 1 
+#define _XOPEN_SOURCE 700
 
 typedef enum {
     MANAGER=100007, 
@@ -67,45 +68,121 @@ int get_next_report_id(char* path);
 void check_permissions(char path[], Role role, int access_type);
 void log_action(Command* cmd, char action[]);
 char* role_to_string(Role role);
+int parse_condition(const char* input, char field[], char op[], char value[]);
+int match_condition(Report* r, const char field[], const char op[], const char value[]);
+int compare_int(long long left, const char op[], long long right);
+int compare_string(const char left[], const char op[], const char right[]);
 
 // =============== COMMANDS ===============
-// TODO: add logger
 void add(Command* cmd) {
     size_t BUFFER_SIZE = 256; 
 
     char path[BUFFER_SIZE];
-    size_t bytes_written = snprintf(path, sizeof(path), "%s", cmd->district_id);
+    int bytes_written;
 
-    if(bytes_written >= BUFFER_SIZE) {
-        fprintf(stderr, "ERROR: overwrite!\n");
+    struct stat stat_buff;  
+
+    bytes_written = snprintf(path, sizeof(path), "%s", cmd->district_id);
+
+    if(bytes_written < 0 || bytes_written >= (int)BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: path is too long!\n");
         exit(EXIT_FAILURE);
     }
 
-    struct stat stat_buff;  
+    // create district directory if it does not exist
     if(stat(path, &stat_buff) == -1) {
         if(mkdir(path, 0750) != 0) {
-            fprintf(stderr, "ERROR: couldn't create the directory!\n");
+            perror("ERROR: couldn't create the directory");
             exit(EXIT_FAILURE);
         }
 
         chmod(path, 0750);
     }
-    
+
+    // inspector does NOT need write permission on the directory
+    // inspector only needs execute permission to enter it
+    check_permissions(cmd->district_id, cmd->role, ACCESS_EXEC);
+
+    // create reports.dat path
     bytes_written = snprintf(path, sizeof(path), "%s/reports.dat", cmd->district_id);
-    if(bytes_written >= BUFFER_SIZE) {
-        fprintf(stderr, "ERROR: overwrite!\n");
+
+    if(bytes_written < 0 || bytes_written >= (int)BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: path is too long!\n");
         exit(EXIT_FAILURE);
     }
-    check_permissions(cmd->district_id, cmd->role, ACCESS_WRITE);
+
+    // create reports.dat if it does not exist yet
+    int fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0664);
+
+    if(fd == -1) {
+        perror("ERROR: couldn't open reports.dat");
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+    chmod(path, 0664);
+
+    // now it exists, so now we can check permission
     check_permissions(path, cmd->role, ACCESS_WRITE);
 
+    // create district.cfg if missing
+    char cfg_path[BUFFER_SIZE];
+
+    bytes_written = snprintf(cfg_path, sizeof(cfg_path), "%s/district.cfg", cmd->district_id);
+
+    if(bytes_written < 0 || bytes_written >= (int)BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: path is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(stat(cfg_path, &stat_buff) == -1) {
+        fd = open(cfg_path, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+
+        if(fd == -1) {
+            perror("ERROR: couldn't create district.cfg");
+            exit(EXIT_FAILURE);
+        }
+
+        char threshold[] = "3\n";
+
+        if(write(fd, threshold, strlen(threshold)) != (ssize_t)strlen(threshold)) {
+            perror("ERROR: couldn't write district.cfg");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        close(fd);
+        chmod(cfg_path, 0640);
+    }
+
+    // create logged_district if missing
+    char log_path[BUFFER_SIZE];
+
+    bytes_written = snprintf(log_path, sizeof(log_path), "%s/logged_district", cmd->district_id);
+
+    if(bytes_written < 0 || bytes_written >= (int)BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: path is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(stat(log_path, &stat_buff) == -1) {
+        fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+
+        if(fd == -1) {
+            perror("ERROR: couldn't create logged_district");
+            exit(EXIT_FAILURE);
+        }
+
+        close(fd);
+        chmod(log_path, 0644);
+    }
+
     Report r;
-    int fd; 
-    int threshold; 
 
     memset(&r, 0, sizeof(Report));
 
     r.id = get_next_report_id(path);
+
     strncpy(r.inspector, cmd->user, sizeof(r.inspector) - 1);
     r.inspector[sizeof(r.inspector) - 1] = '\0';
 
@@ -138,7 +215,6 @@ void add(Command* cmd) {
         exit(EXIT_FAILURE);
     }
 
-    // remove the remaining newline before fgets
     int ch;
     while((ch = getchar()) != '\n' && ch != EOF) {
     }
@@ -150,13 +226,12 @@ void add(Command* cmd) {
     }
 
     r.description[strcspn(r.description, "\n")] = '\0';
+
     r.timestamp = time(NULL);
 
     fd = open(path, O_WRONLY | O_APPEND);
+
     if(fd == -1) {
-        if(errno == ENOENT) {
-            return 1;
-        }
         perror("ERROR: couldn't open reports.dat");
         exit(EXIT_FAILURE);
     }
@@ -168,26 +243,16 @@ void add(Command* cmd) {
     }
 
     close(fd);
-    chmod(path, 0664);
 
-    if(r.id == 1) {
-        snprintf(path, sizeof(path), "%s/district.cfg", cmd->district_id);
-        FILE* f = fopen(path, "w"); 
-
-        if(f != NULL) {
-            fprintf(f, "%d", 3);
-            fclose(f);
-            chmod(path, 0640);
-        }
-        else {
-            fprintf(stderr, "ERROR: Failed district.cfg!\n");
-            exit(EXIT_FAILURE);
-        }
+    // Your log_action() currently refuses inspector, because logged_district is 0644.
+    // So manager actions are logged, inspector actions are allowed but not logged.
+    if(cmd->role == MANAGER) {
+        log_action(cmd, "add");
     }
-
-    log_action(cmd, "add");
+    else {
+        fprintf(stderr, "WARNING: inspector add worked, but was not logged because logged_district is manager-write only.\n");
+    }
 }
-
 
 void list(Command* cmd) {
     size_t BUFFER_SIZE = 256;
@@ -225,15 +290,224 @@ void list(Command* cmd) {
 }
 
 void remove_report(Command* cmd) {
-    return; 
-}
+    size_t BUFFER_SIZE = 256;
+    char path[BUFFER_SIZE];
+    size_t bytes_written;
+    struct stat stat_buff;
+    int fd;
+    Report r;
+    int found = 0;
+    int found_position = -1;
+    long total_reports;
+    long i;
 
+    if(cmd->role != MANAGER) {
+        fprintf(stderr, "ERROR: only manager can remove reports!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    bytes_written = snprintf(path, sizeof(path), "%s/reports.dat", cmd->district_id);
+    if(bytes_written >= BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: name is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    check_permissions(cmd->district_id, cmd->role, ACCESS_EXEC);
+    check_permissions(path, cmd->role, ACCESS_READ | ACCESS_WRITE);
+
+    if(stat(path, &stat_buff) == -1) {
+        perror("ERROR: stat failed for reports.dat");
+        exit(EXIT_FAILURE);
+    }
+
+    total_reports = stat_buff.st_size / sizeof(Report);
+
+    fd = open(path, O_RDWR);
+    if(fd == -1) {
+        perror("ERROR: couldn't open reports.dat");
+        exit(EXIT_FAILURE);
+    }
+
+    for(i = 0; i < total_reports; i++) {
+        if(read(fd, &r, sizeof(Report)) != sizeof(Report)) {
+            perror("ERROR: couldn't read report");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        if(r.id == cmd->report_id) {
+            found = 1;
+            found_position = i;
+            break;
+        }
+    }
+
+    if(!found) {
+        fprintf(stderr, "ERROR: report with id %d was not found!\n", cmd->report_id);
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    for(i = found_position + 1; i < total_reports; i++) {
+        if(lseek(fd, i * sizeof(Report), SEEK_SET) == -1) {
+            perror("ERROR: lseek failed");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        if(read(fd, &r, sizeof(Report)) != sizeof(Report)) {
+            perror("ERROR: couldn't read report while shifting");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        if(lseek(fd, (i - 1) * sizeof(Report), SEEK_SET) == -1) {
+            perror("ERROR: lseek failed");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        if(write(fd, &r, sizeof(Report)) != sizeof(Report)) {
+            perror("ERROR: couldn't write shifted report");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if(ftruncate(fd, (total_reports - 1) * sizeof(Report)) == -1) {
+        perror("ERROR: ftruncate failed");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+
+    printf("Report %d removed successfully.\n", cmd->report_id);
+    log_action(cmd, "remove_report");
+}
 void update_threshold(Command* cmd) {
-    return; 
+    size_t BUFFER_SIZE = 256;
+    char path[BUFFER_SIZE];
+    char buffer[64];
+    size_t bytes_written;
+    int line_size;
+    int fd;
+    struct stat stat_buff;
+
+    if(cmd->role != MANAGER) {
+        fprintf(stderr, "ERROR: only manager can update threshold!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(cmd->severity < 1 || cmd->severity > 3) {
+        fprintf(stderr, "ERROR: threshold must be 1, 2, or 3!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    bytes_written = snprintf(path, sizeof(path), "%s/district.cfg", cmd->district_id);
+    if(bytes_written >= BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: name is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(stat(path, &stat_buff) == -1) {
+        perror("ERROR: stat failed for district.cfg");
+        exit(EXIT_FAILURE);
+    }
+
+    if((stat_buff.st_mode & 0777) != 0640) {
+        fprintf(stderr, "ERROR: district.cfg permissions must be 640!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    check_permissions(path, cmd->role, ACCESS_WRITE);
+
+    fd = open(path, O_WRONLY | O_TRUNC);
+    if(fd == -1) {
+        perror("ERROR: couldn't open district.cfg");
+        exit(EXIT_FAILURE);
+    }
+
+    line_size = snprintf(buffer, sizeof(buffer), "%d\n", cmd->severity);
+    if(line_size < 0 || (size_t)line_size >= sizeof(buffer)) {
+        fprintf(stderr, "ERROR: threshold line too long!\n");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    if(write(fd, buffer, strlen(buffer)) != (ssize_t)strlen(buffer)) {
+        perror("ERROR: couldn't write threshold");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+
+    printf("Threshold updated to %d.\n", cmd->severity);
+    log_action(cmd, "update_threshold");
 }
 
 void filter(Command* cmd) {
-    return; 
+    size_t BUFFER_SIZE = 256;
+    char path[BUFFER_SIZE];
+    size_t bytes_written;
+    int fd;
+    Report r;
+    size_t i;
+    int good_report;
+    char field[64];
+    char op[8];
+    char value[256];
+
+    bytes_written = snprintf(path, sizeof(path), "%s/reports.dat", cmd->district_id);
+    if(bytes_written >= BUFFER_SIZE) {
+        fprintf(stderr, "ERROR: name is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    check_permissions(cmd->district_id, cmd->role, ACCESS_EXEC);
+    check_permissions(path, cmd->role, ACCESS_READ);
+
+    fd = open(path, O_RDONLY);
+    if(fd == -1) {
+        perror("ERROR: couldn't open reports.dat");
+        exit(EXIT_FAILURE);
+    }
+
+    while(read(fd, &r, sizeof(Report)) == sizeof(Report)) {
+        good_report = 1;
+
+        for(i = 0; i < cmd->conditions_count; i++) {
+            if(!parse_condition(cmd->conditions[i], field, op, value)) {
+                fprintf(stderr, "ERROR: invalid condition: %s\n", cmd->conditions[i]);
+                close(fd);
+                exit(EXIT_FAILURE);
+            }
+
+            if(!match_condition(&r, field, op, value)) {
+                good_report = 0;
+                break;
+            }
+        }
+
+        if(good_report) {
+            printf("id = %d \n", r.id);
+            printf("inspector = %s \n", r.inspector);
+            printf("lat = %f \n", r.latitude);
+            printf("long = %f \n", r.longitude);
+            printf("cat = %s \n", r.category);
+            printf("severity = %d \n", r.severity);
+            printf("timestamp = %lld \n", (long long)r.timestamp);
+            printf("description = %s \n", r.description);
+            printf("-----------------------------\n");
+        }
+    }
+
+    close(fd);
+
+    if(cmd->role == MANAGER) {
+        log_action(cmd, "filter");
+    }
 }
 
 void view(Command* cmd) {
@@ -501,7 +775,7 @@ void check_permissions(char path[], Role role, int access_type) {
     mode_t exec_bit  = S_IXOTH; 
     char permissions[10];
 
-    if(stat(path, &stat_buff) == 1) {
+    if(stat(path, &stat_buff) == -1) {
         fprintf(stderr, "ERROR: couldn't open the file/directory!\n");
         exit(EXIT_FAILURE);
     }
@@ -587,6 +861,110 @@ void log_action(Command* cmd, char action[]) {
 
     close(fd);
 }
+
+int parse_condition(const char* input, char field[], char op[], char value[]) {
+    const char* first_colon;
+    const char* second_colon;
+    size_t field_size;
+    size_t op_size;
+
+    first_colon = strchr(input, ':');
+    if(first_colon == NULL) {
+        return 0;
+    }
+
+    second_colon = strchr(first_colon + 1, ':');
+    if(second_colon == NULL) {
+        return 0;
+    }
+
+    field_size = first_colon - input;
+    op_size = second_colon - first_colon - 1;
+
+    if(field_size == 0 || field_size >= 64) {
+        return 0;
+    }
+
+    if(op_size == 0 || op_size >= 8) {
+        return 0;
+    }
+
+    strncpy(field, input, field_size);
+    field[field_size] = '\0';
+
+    strncpy(op, first_colon + 1, op_size);
+    op[op_size] = '\0';
+
+    strncpy(value, second_colon + 1, 255);
+    value[255] = '\0';
+
+    if(strcmp(op, "==") != 0 && strcmp(op, "!=") != 0 &&
+       strcmp(op, "<") != 0  && strcmp(op, "<=") != 0 &&
+       strcmp(op, ">") != 0  && strcmp(op, ">=") != 0) {
+        return 0;
+    }
+
+    return 1;
+}
+
+int compare_int(long long left, const char op[], long long right) {
+    if(strcmp(op, "==") == 0) return left == right;
+    if(strcmp(op, "!=") == 0) return left != right;
+    if(strcmp(op, "<") == 0)  return left < right;
+    if(strcmp(op, "<=") == 0) return left <= right;
+    if(strcmp(op, ">") == 0)  return left > right;
+    if(strcmp(op, ">=") == 0) return left >= right;
+
+    return 0;
+}
+
+int compare_string(const char left[], const char op[], const char right[]) {
+    int result = strcmp(left, right);
+
+    if(strcmp(op, "==") == 0) return result == 0;
+    if(strcmp(op, "!=") == 0) return result != 0;
+    if(strcmp(op, "<") == 0)  return result < 0;
+    if(strcmp(op, "<=") == 0) return result <= 0;
+    if(strcmp(op, ">") == 0)  return result > 0;
+    if(strcmp(op, ">=") == 0) return result >= 0;
+
+    return 0;
+}
+
+int match_condition(Report* r, const char field[], const char op[], const char value[]) {
+    char* endptr;
+    long long number;
+
+    if(strcmp(field, "severity") == 0) {
+        number = strtoll(value, &endptr, 10);
+        if(endptr == value || *endptr != '\0') {
+            return 0;
+        }
+
+        return compare_int(r->severity, op, number);
+    }
+
+    if(strcmp(field, "timestamp") == 0) {
+        number = strtoll(value, &endptr, 10);
+        if(endptr == value || *endptr != '\0') {
+            return 0;
+        }
+
+        return compare_int((long long)r->timestamp, op, number);
+    }
+
+    if(strcmp(field, "category") == 0) {
+        return compare_string(r->category, op, value);
+    }
+
+    if(strcmp(field, "inspector") == 0) {
+        return compare_string(r->inspector, op, value);
+    }
+
+    return 0;
+}
+
+
 int main(int argc, char** argv) {
 	if(argc < 7) {
 		// write(stderr, "ERROR: you have not specified the role and the command!\n", 60); 
