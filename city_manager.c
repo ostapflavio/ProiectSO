@@ -122,6 +122,8 @@ void add(Command* cmd) {
     close(fd);
     chmod(path, 0664);
 
+    ensure_active_reports_symlink(cmd->district_id);
+
     // now it exists, so now we can check permission
     check_permissions(path, cmd->role, ACCESS_WRITE);
 
@@ -244,8 +246,6 @@ void add(Command* cmd) {
 
     close(fd);
 
-    // Your log_action() currently refuses inspector, because logged_district is 0644.
-    // So manager actions are logged, inspector actions are allowed but not logged.
     if(cmd->role == MANAGER) {
         log_action(cmd, "add");
     }
@@ -964,6 +964,114 @@ int match_condition(Report* r, const char field[], const char op[], const char v
     return 0;
 }
 
+void scan_active_report_links(void) {
+    DIR* dir;
+    struct dirent* entry;
+    struct stat stat_buff;
+    char target[PATH_MAX];
+    ssize_t bytes_read;
+
+    dir = opendir(".");
+    if(dir == NULL) {
+        perror("WARNING: couldn't scan current directory");
+        return;
+    }
+
+    while((entry = readdir(dir)) != NULL) {
+        if(strncmp(entry->d_name, "active_reports-", strlen("active_reports-")) != 0) {
+            continue;
+        }
+
+        if(lstat(entry->d_name, &stat_buff) == -1) {
+            perror("WARNING: lstat failed while scanning active_reports links");
+            continue;
+        }
+
+        if(!S_ISLNK(stat_buff.st_mode)) {
+            continue;
+        }
+
+        bytes_read = readlink(entry->d_name, target, sizeof(target) - 1);
+        if(bytes_read == -1) {
+            perror("WARNING: couldn't read active_reports symlink while scanning");
+            continue;
+        }
+
+        target[bytes_read] = '\0';
+
+        if(stat(target, &stat_buff) == -1 && errno == ENOENT) {
+            fprintf(stderr, "WARNING: dangling symlink detected: %s -> %s\n", entry->d_name, target);
+        }
+    }
+
+    closedir(dir);
+}
+
+void ensure_active_reports_symlink(const char district_id[]) {
+    char target[PATH_MAX];
+    char link_name[PATH_MAX];
+    char current_target[PATH_MAX];
+    struct stat target_stat;
+    struct stat link_stat;
+    int bytes_written;
+    ssize_t bytes_read;
+
+    bytes_written = snprintf(target, sizeof(target), "%s/reports.dat", district_id);
+    if(bytes_written < 0 || bytes_written >= (int)sizeof(target)) {
+        fprintf(stderr, "ERROR: report path is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    bytes_written = snprintf(link_name, sizeof(link_name), "active_reports-%s", district_id);
+    if(bytes_written < 0 || bytes_written >= (int)sizeof(link_name)) {
+        fprintf(stderr, "ERROR: symlink name is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(stat(target, &target_stat) == -1) {
+        fprintf(stderr, "WARNING: cannot create %s because target %s does not exist.\n", link_name, target);
+        return;
+    }
+
+    if(lstat(link_name, &link_stat) == -1) {
+        if(errno != ENOENT) {
+            perror("WARNING: lstat failed for active_reports symlink");
+            return;
+        }
+
+        if(symlink(target, link_name) == -1) {
+            perror("WARNING: couldn't create active_reports symlink");
+            return;
+        }
+
+        return;
+    }
+
+    if(!S_ISLNK(link_stat.st_mode)) {
+        fprintf(stderr, "WARNING: %s already exists, but it is not a symlink. I will not replace it.\n", link_name);
+        return;
+    }
+
+    bytes_read = readlink(link_name, current_target, sizeof(current_target) - 1);
+    if(bytes_read == -1) {
+        perror("WARNING: couldn't read active_reports symlink");
+        return;
+    }
+
+    current_target[bytes_read] = '\0';
+
+    if(strcmp(current_target, target) != 0) {
+        if(unlink(link_name) == -1) {
+            perror("WARNING: couldn't remove old active_reports symlink");
+            return;
+        }
+
+        if(symlink(target, link_name) == -1) {
+            perror("WARNING: couldn't recreate active_reports symlink");
+            return;
+        }
+    }
+}
 
 int main(int argc, char** argv) {
 	if(argc < 7) {
