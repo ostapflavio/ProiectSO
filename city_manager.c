@@ -8,7 +8,7 @@
 #define INSPECTOR 2100007
 
 void add(char** line) {
-	return; 
+		 
 }
 
 
