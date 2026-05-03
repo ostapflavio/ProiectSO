@@ -8,8 +8,10 @@
 #include <limits.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <signal.h>
 #include <dirent.h>
-
 #define ACCESS_READ 4 
 #define ACCESS_WRITE 2 
 #define ACCESS_EXEC 1 
@@ -26,7 +28,8 @@ typedef enum {
     VIEW, 
     REMOVE_REPORT, 
     UPDATE_THRESHOLD, 
-    FILTER
+    FILTER,
+    REMOVE_DISTRICT
 } CommandType; 
 
 typedef struct {
@@ -626,6 +629,21 @@ void view(Command* cmd) {
         log_action(cmd, "view");
     }
 }
+
+void remove_district(Command* cmd) {
+    struct stat st; 
+
+    if(cmd->role != MANAGER) {
+        fprintf(stderr, "ERROR: only manager can remove a district!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(lstat(cmd->district_id, &st) == -1) {
+        fprintf(stderr, "ERROR: couldn't open the directory!\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 // =============== HELPERS =============== 
 
 // high technical debt command, but it is what it is to keep single repsponsiblitiy 
@@ -643,6 +661,8 @@ void (*detect_command(Command* cmd))(Command *) {
             return update_threshold;
         case FILTER:
             return filter;
+        case REMOVE_DISTRICT; 
+            return remove_district; 
     }
     return NULL; 
 }
@@ -693,7 +713,6 @@ Command parse_arguments(int argc, char** argv) {
         cmd.command = LIST;  
         strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
         cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
-   
       }
 
     else if(strcmp(argv[5], "--add") == 0) {
@@ -781,6 +800,17 @@ Command parse_arguments(int argc, char** argv) {
 
         cmd.conditions = &argv[7];
         cmd.conditions_count = argc - 7; 
+    }
+
+    else if (strcmp(argv[5], "--remove_district") == 0) {
+        if(argc != 7) {
+            fprintf(stderr, "ERROR: incorrect count for arguments for remove_district!\n");
+            exit(EXIT_FAILURE);
+        }
+
+        cmd.command = REMOVE_DISTRICT;
+        strncpy(cmd.district_id, argv[6], sizeof(cmd.district_id) - 1);
+        cmd.district_id[sizeof(cmd.district_id) - 1] = '\0';
     }
 
     else {
