@@ -722,7 +722,7 @@ void (*detect_command(Command* cmd))(Command *) {
             return update_threshold;
         case FILTER:
             return filter;
-        case REMOVE_DISTRICT; 
+        case REMOVE_DISTRICT: 
             return remove_district; 
     }
     return NULL; 
