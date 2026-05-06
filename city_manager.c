@@ -652,24 +652,56 @@ void remove_district(Command* cmd) {
 
     else if(p == 0) {
         int BUFFER_SIZE = 512; 
-        int ret_directory = unlink(cmd->district_id); 
-        if(ret_directory == -1) {
+        char symlink_name[BUFFER_SIZE]; 
+        char reports_path[BUFFER_SIZE];
+        char logging_path[BUFFER_SIZE];
+        char config_path[BUFFER_SIZE]; 
+    
+        snprintf(reports_path, sizeof(reports_path), "%s/reports.dat", cmd->district_id);
+        snprintf(logging_path, sizeof(logging_path), "%s/logged_district", cmd->district_id);
+        snprintf(config_path, sizeof(config_path), "%s/district.cfg", cmd->district_id);
+        snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", cmd->district_id);
+
+        if(unlink(symlink_name) == -1) {
+            fprintf(stderr, "ERROR: we have failed to delete the symlink!\n");
+            exit(EXIT_FAILURE); 
+        }
+
+        if(unlink(reports_path) == -1) {
+            fprintf(stderr, "ERROR: we have failed to delete the reports.dat!\n");
+            exit(EXIT_FAILURE); 
+        }
+
+        if(unlink(logging_path) == -1) {
+            fprintf(stderr, "ERROR: we have failed to delete the logged_distirct!\n");
+            exit(EXIT_FAILURE); 
+        }
+
+        if(unlink(config_path) == -1) {
+            fprintf(stderr, "ERROR: we have failed to delete the district.cfg!\n");
+            exit(EXIT_FAILURE); 
+        }
+
+        if(rmdir(cmd->district_id) == -1) {
             fprintf(stderr, "ERROR: we have failed to delete the directory!\n"); 
             exit(EXIT_FAILURE);
         }
 
-        char symlink_name[BUFFER_SIZE]; 
-
-        snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", cmd->district_id);
-        int ret_symlink = unlink(symlink_name); 
-        if(ret_symlink == -1) {
-            fprintf(stderr, "ERROR: we have failed to delete the symlink!\n"); 
-            exit(EXIT_FAILURE);
-        } 
+        exit(EXIT_SUCCESS); 
     }
 
     else {
-        printf("hello from parent!\n");
+        int status; 
+        waitpid(p, &status, 0); 
+        
+        if(WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            printf("SUCCESS: district removed!\n"); 
+        }
+        else {
+            fprintf(stderr, "ERROR: child process failed!\n");
+            exit(EXIT_FAILURE); 
+        }
+        
     }
 }
 
