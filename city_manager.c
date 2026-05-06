@@ -642,6 +642,35 @@ void remove_district(Command* cmd) {
         fprintf(stderr, "ERROR: couldn't open the directory!\n");
         exit(EXIT_FAILURE);
     }
+
+    pid_t p = fork();
+    
+    if(p<0){
+      fprintf(stderr, "ERROR: couldn't create a child process!");
+      exit(EXIT_FAILURE);
+    }
+
+    else if(p == 0) {
+        int BUFFER_SIZE = 512; 
+        int ret_directory = unlink(cmd->district_id); 
+        if(ret_directory == -1) {
+            fprintf(stderr, "ERROR: we have failed to delete the directory!\n"); 
+            exit(EXIT_FAILURE);
+        }
+
+        char symlink_name[BUFFER_SIZE]; 
+
+        snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", cmd->district_id);
+        int ret_symlink = unlink(symlink_name); 
+        if(ret_symlink == -1) {
+            fprintf(stderr, "ERROR: we have failed to delete the symlink!\n"); 
+            exit(EXIT_FAILURE);
+        } 
+    }
+
+    else {
+        printf("hello from parent!\n");
+    }
 }
 
 // =============== HELPERS =============== 
