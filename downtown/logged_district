@@ -1,10 +1,13 @@
-2026-05-11 00:29:18 role=inspector user=charlie action=SUCCESS: notified monitor with SIGUSR1
+2026-05-11 00:44:29 role=manager user=alice action=add
+2026-05-11 00:44:29 role=manager user=alice action=ERROR: don't know the monitor_pid!
 
-2026-05-11 00:29:39 role=inspector user=favunea action=SUCCESS: notified monitor with SIGUSR1
+2026-05-11 00:45:06 role=inspector user=bob action=ERROR: don't know the monitor_pid!
 
-2026-05-11 00:31:13 role=manager user=favunea action=add
-2026-05-11 00:31:13 role=manager user=favunea action=SUCCESS: notified monitor with SIGUSR1
+2026-05-11 00:45:45 role=inspector user=charlie action=SUCCESS:added a new district report with SIGUSR1!
 
-2026-05-11 00:32:45 role=manager user=favunea action=add
-2026-05-11 00:32:45 role=manager user=favunea action=SUCCESS:added a new district report with SIGUSR1!
-
+2026-05-11 00:47:03 role=manager user=alice action=update_threshold
+2026-05-11 00:47:24 role=manager user=alice action=list
+2026-05-11 00:47:30 role=manager user=alice action=remove_report
+2026-05-11 00:47:33 role=manager user=alice action=list
+2026-05-11 00:48:35 role=manager user=alice action=add
+2026-05-11 00:48:35 role=manager user=alice action=ERROR: we couldn't send a SIGUSR1 to pid=999999!
