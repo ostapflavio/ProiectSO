@@ -84,16 +84,23 @@ I also had to make sure that I understood the code line by line, as this is vita
 For this project, I have used ChatGPT 5.5 and Gemini 3.1 Pro
 
 I used it as a learning and debugging tool, not as replacement to write code. 
-The code was written by me, adapted to my style - but I have used AI to test the correcteness for my program - to avoid missing a corner case. 
+The code was written by me, adapted to my style - but I have used AI to test the correctness for my program - to avoid missing a corner case. 
 
 ## Where AI helped me
-It was only used as a reviewer for my code, whose feedback in some cases, I woud listen to (for example, in monitor_reports.c it suggested me to use pause() instead of continue inside of while(running)) and it other cases I would ignore it (it suggested me that if unlink(symlink_name) fails, then I don't need to panic and keep the execution of the program going, which I don't think should be right).
+Primarily it was used as a reviewer for my code, whose feedback in some cases, I would listen to (for example, in monitor_reports.c it suggested me to use pause() instead of continue inside of while(running)) and it other cases I would ignore it (it suggested me that if unlink(symlink_name) fails, then I don't need to panic and keep the execution of the program going, which I don't think should be the right behavior).
+
+Also it generated me the commands on which I would test the correctness of my program. 
 
 ## Prompts used 
-Absolutely straightforward - i would attach my code and ask it "what do you think?"  and we would continue to talk until I fix all the mistakes. 
+Absolutely straightforward - I would attach my code and ask it "what do you think?" and we would continue to talk until I fix all the mistakes and the quality was good enough. 
+
+Also I would write to it "generate me some commands on which I would test my code".
+
 ## What AI generated 
 It would copy snippets of code from my program and would criticize it and suggest me ways to improve - I would take only the decision, to make it how it told me or in the other way. Also it would point out to logical errors in my program and corner cases that I didn't check. 
 
 ## Critical evaluation of AI output 
-AI didn't help me alot during that phase, it was the internet. 
+AI didn't help me a lot during that phase, it was the internet. 
 The article that helped me the most was this one [https://www.codequoi.com/en/sending-and-intercepting-a-signal-in-c/].
+
+Still it was very useful, because it gave me additional believe that my program was correct. 
