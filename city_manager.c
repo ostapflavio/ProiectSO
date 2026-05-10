@@ -691,6 +691,7 @@ void remove_district(Command* cmd) {
     }
 
     else {
+        // better way to receive signals 
         int status; 
         waitpid(p, &status, 0); 
         
