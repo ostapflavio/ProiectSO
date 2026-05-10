@@ -15,6 +15,7 @@
 #define ACCESS_READ 4 
 #define ACCESS_WRITE 2 
 #define ACCESS_EXEC 1 
+#define UNKNOWN 0 
 
 typedef enum {
     MANAGER=100007, 
@@ -79,6 +80,8 @@ int compare_string(const char left[], const char op[], const char right[]);
 void mode_to_string(mode_t mode, char output[]);
 void scan_active_report_links(void);
 void ensure_active_reports_symlink(const char district_id[]);
+void notify_monitor(Command* cmd, pid_t monitor_pid);
+pid_t get_monitor_pid();
 
 // =============== COMMANDS ===============
 void add(Command* cmd) {
@@ -252,13 +255,17 @@ void add(Command* cmd) {
     }
 
     close(fd);
-
+    
     if(cmd->role == MANAGER) {
         log_action(cmd, "add");
     }
     else {
         fprintf(stderr, "WARNING: inspector add worked, but was not logged because logged_district is manager-write only.\n");
     }
+
+    // notify monitor
+    pid_t monitor_pid = get_monitor_pid();
+    notify_monitor(cmd, monitor_pid);
 }
 
 void list(Command* cmd) {
@@ -643,58 +650,48 @@ void remove_district(Command* cmd) {
         exit(EXIT_FAILURE);
     }
 
-    pid_t p = fork();
+    if(!S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "ERROR: this is not a directory!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // protect myself from dumb me....
+    if(strcmp(cmd->district_id, ".") == 0 || strcmp(cmd->district_id, "..") == 0 || strcmp(cmd->district_id, "/") == 0) {
+        fprintf(stderr, "ERROR: unsafe district path!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    int BUFFER_SIZE = 512; 
+    char symlink_name[BUFFER_SIZE]; 
+    char path[BUFFER_SIZE];
+    snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", cmd->district_id);
+    snprintf(path, sizeof(path), "%s", cmd->district_id);
+
+    if(unlink(symlink_name) == -1) {
+        fprintf(stderr, "ERROR: we have failed to delete the symlink!\n");
+        exit(EXIT_FAILURE); 
+    }
+
+    pid_t p = vfork();
     
-    if(p<0){
+    if(p < 0){
       fprintf(stderr, "ERROR: couldn't create a child process!");
       exit(EXIT_FAILURE);
     }
 
     else if(p == 0) {
-        int BUFFER_SIZE = 512; 
-        char symlink_name[BUFFER_SIZE]; 
-        char reports_path[BUFFER_SIZE];
-        char logging_path[BUFFER_SIZE];
-        char config_path[BUFFER_SIZE]; 
-    
-        snprintf(reports_path, sizeof(reports_path), "%s/reports.dat", cmd->district_id);
-        snprintf(logging_path, sizeof(logging_path), "%s/logged_district", cmd->district_id);
-        snprintf(config_path, sizeof(config_path), "%s/district.cfg", cmd->district_id);
-        snprintf(symlink_name, sizeof(symlink_name), "active_reports-%s", cmd->district_id);
-
-        if(unlink(symlink_name) == -1) {
-            fprintf(stderr, "ERROR: we have failed to delete the symlink!\n");
-            exit(EXIT_FAILURE); 
-        }
-
-        if(unlink(reports_path) == -1) {
-            fprintf(stderr, "ERROR: we have failed to delete the reports.dat!\n");
-            exit(EXIT_FAILURE); 
-        }
-
-        if(unlink(logging_path) == -1) {
-            fprintf(stderr, "ERROR: we have failed to delete the logged_distirct!\n");
-            exit(EXIT_FAILURE); 
-        }
-
-        if(unlink(config_path) == -1) {
-            fprintf(stderr, "ERROR: we have failed to delete the district.cfg!\n");
-            exit(EXIT_FAILURE); 
-        }
-
-        if(rmdir(cmd->district_id) == -1) {
-            fprintf(stderr, "ERROR: we have failed to delete the directory!\n"); 
-            exit(EXIT_FAILURE);
-        }
-
-        exit(EXIT_SUCCESS); 
+        execlp("rm", "rm", "-rf", path, NULL); 
+        _exit(EXIT_FAILURE);
     }
 
     else {
         // better way to receive signals 
         int status; 
-        waitpid(p, &status, 0); 
-        
+        if(waitpid(p, &status, 0) == -1) {
+            fprintf(stderr, "ERROR: waitpid failed!\n");
+            exit(EXIT_FAILURE);
+        }
+
         if(WIFEXITED(status) && WEXITSTATUS(status) == 0) {
             printf("SUCCESS: district removed!\n"); 
         }
@@ -1034,6 +1031,74 @@ void log_action(Command* cmd, char action[]) {
     }
 
     close(fd);
+}
+
+pid_t get_monitor_pid() {
+    pid_t monitor_pid; 
+    int fd = open(".monitor_pid", O_RDONLY);
+
+    if(fd == -1) {
+        fprintf(stderr, "ERROR: couldn't open monitor_pid file!\n");
+        return UNKNOWN; 
+    }
+
+    char buffer[32];
+
+    ssize_t bytes_read = read(fd, buffer, sizeof(buffer) - 1);
+    if(bytes_read == -1) {
+        fprintf(stderr, "ERROR: couldn't read .monitor_pid!\n");
+        close(fd);
+        return UNKNOWN; 
+    }
+
+    if(bytes_read == 0) {
+        fprintf(stderr, "ERROR: .monitor_pid is empty!\n");
+        close(fd);
+        return UNKNOWN; 
+    }
+
+    buffer[bytes_read] = '\0';
+
+    close(fd);
+
+    char* endptr;
+    errno = 0;
+    long val = strtol(buffer, &endptr, 10);
+
+    if(errno == ERANGE || endptr == buffer) {
+        fprintf(stderr, "ERROR: value is too large or no numbers were found inside of .monitor_pid!\n");
+        return UNKNOWN;
+    }
+
+
+    monitor_pid = (pid_t)val; 
+    if(monitor_pid <= 0) {
+        fprintf(stderr, "ERROR: invalid monitor PID!\n");
+        return UNKNOWN; 
+    }
+
+    return monitor_pid; 
+}
+
+void notify_monitor(Command* cmd, pid_t monitor_pid) {
+    char message[128];
+    if(monitor_pid == UNKNOWN) {
+        snprintf(message, sizeof(message), "ERROR: don't know the monitor_pid!\n", monitor_pid); 
+    }
+
+    if(!(monitor_pid == UNKNOWN) && kill(monitor_pid, SIGUSR1) == -1) {
+        snprintf(message, sizeof(message), "ERROR: we couldn't send a SIGUSR1 to pid=%d!", monitor_pid); 
+        fprintf(stderr, "%s", message);
+
+        if(cmd->role == MANAGER) {
+            log_action(cmd, message);
+        }
+    }
+    
+    if(cmd->role == MANAGER) {
+        snprintf(message, sizeof(message), "SUCCESS: notified monitor with SIGUSR1\n");
+        log_action(cmd, message);
+    }
 }
 
 int parse_condition(const char* input, char field[], char op[], char value[]) {
