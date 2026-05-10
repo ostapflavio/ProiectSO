@@ -82,8 +82,9 @@ void scan_active_report_links(void);
 void ensure_active_reports_symlink(const char district_id[]);
 void notify_monitor(Command* cmd, pid_t monitor_pid);
 pid_t get_monitor_pid();
-
+void log_monitor_notification(Command* cmd, char action[]);
 // =============== COMMANDS ===============
+
 void add(Command* cmd) {
     size_t BUFFER_SIZE = 256; 
 
@@ -672,7 +673,7 @@ void remove_district(Command* cmd) {
         exit(EXIT_FAILURE); 
     }
 
-    pid_t p = vfork();
+    pid_t p = fork();
     
     if(p < 0){
       fprintf(stderr, "ERROR: couldn't create a child process!");
@@ -1033,6 +1034,60 @@ void log_action(Command* cmd, char action[]) {
     close(fd);
 }
 
+void log_monitor_notification(Command* cmd, char action[]) {
+    int BUFFER_SIZE = 256;
+    char path[BUFFER_SIZE];
+    char line[1024];
+    snprintf(path, sizeof(path), "%s/logged_district", cmd->district_id);
+
+    struct stat stat_buff; 
+    if(stat(path, &stat_buff) == -1) {
+        fprintf(stderr, "ERROR: stat failed!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if(!(stat_buff.st_mode & S_IWUSR)) {
+        fprintf(stderr, "ERROR: logged_ditsr does not have manager write permission!\n");
+        exit(EXIT_FAILURE);
+    }
+
+
+    int fd; 
+    char time_buffer[64];
+    time_t now; 
+    struct tm* time_info; 
+    now = time(NULL);
+    time_info = localtime(&now);
+    if(time_info != NULL) {
+        strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
+    }
+    else {
+        strncpy(time_buffer, "unknown", sizeof(time_buffer) - 1);
+        time_buffer[sizeof(time_buffer) - 1] = '\0';
+    }
+
+    int line_size = snprintf(line, sizeof(line), "%s role=%s user=%s action=%s\n", time_buffer, role_to_string(cmd->role), cmd->user, action);
+    if(line_size < 0 || (size_t)line_size >= sizeof(line)) {
+        fprintf(stderr, "ERROR: log line is too long!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    fd = open(path, O_WRONLY | O_APPEND);
+    if(fd == -1) {
+        perror("ERROR: couldn't open log file");
+        exit(EXIT_FAILURE);
+    }
+
+    if(write(fd, line, strlen(line)) != (ssize_t)strlen(line)) {
+        perror("ERROR: couldn't write log");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    close(fd);
+}
+
+
 pid_t get_monitor_pid() {
     pid_t monitor_pid; 
     int fd = open(".monitor_pid", O_RDONLY);
@@ -1082,23 +1137,22 @@ pid_t get_monitor_pid() {
 
 void notify_monitor(Command* cmd, pid_t monitor_pid) {
     char message[128];
-    if(monitor_pid == UNKNOWN) {
-        snprintf(message, sizeof(message), "ERROR: don't know the monitor_pid!\n", monitor_pid); 
+    if(monitor_pid == UNKNOWN) { 
+        snprintf(message, sizeof(message), "ERROR: don't know the monitor_pid!\n"); 
+        log_monitor_notification(cmd, message);
+        return; 
     }
 
-    if(!(monitor_pid == UNKNOWN) && kill(monitor_pid, SIGUSR1) == -1) {
+    if(kill(monitor_pid, SIGUSR1) == -1) {
         snprintf(message, sizeof(message), "ERROR: we couldn't send a SIGUSR1 to pid=%d!", monitor_pid); 
         fprintf(stderr, "%s", message);
 
-        if(cmd->role == MANAGER) {
-            log_action(cmd, message);
-        }
+        log_monitor_notification(cmd, message);
+        return; 
     }
     
-    if(cmd->role == MANAGER) {
-        snprintf(message, sizeof(message), "SUCCESS: notified monitor with SIGUSR1\n");
-        log_action(cmd, message);
-    }
+    snprintf(message, sizeof(message), "SUCCESS:added a new district report with SIGUSR1!\n");
+    log_monitor_notification(cmd, message);
 }
 
 int parse_condition(const char* input, char field[], char op[], char value[]) {
