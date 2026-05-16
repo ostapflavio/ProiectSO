@@ -31,7 +31,6 @@ void start_monitor() {
 			exit(EXIT_FAILURE);
 		}		
 		
-		close(pipefd[1]); 
 			
 
 		pid_t monitor_reports = fork(); 
@@ -41,7 +40,8 @@ void start_monitor() {
 		}
 
 		else if(monitor_reports == 0) {
-			if(dup2(pipefd[0], STDOUT_FILENO) < 0) {
+            close(pipefd[0]);
+			if(dup2(pipefd[1], STDOUT_FILENO) < 0) {
 				fprintf(stderr, "ERROR: dup2 has failed!\n"); 	
 				exit(EXIT_FAILURE); 
 			}	
@@ -53,29 +53,39 @@ void start_monitor() {
 			}
 			execl("./monitor_reports", "./monitor_reports", NULL); 
 
+            fprintf(stderr, "ERROR: execl has failed!\n"); 
+            exit(EXIT_FAILURE);
 		}
 
 		else {
-			close(pipefd[0]); 
-			close(pipefd[1]); 
+			close(pipefd[1]); // hub_mopn does not write anything. 
+
+            char buffer[256];
+            ssize_t n; 
+
+            while((n = read(pipefd[0], buffer, sizeof(buffer) - 1) > 0) {
+                buffer[n] = '\0';
+
+                writestr(STDOUT_FILENO, buffer);
+
+                if(strstr(buffer, "ERROR") != NULL) {
+                    writestr(STDERR_FILENO, "hub_mon: monitor reported an error!\n")
+                }
+
+                if(strstr(buffer, "MONITOR_END") != NULL) {
+                    writestr(STDERR_FILENO, "hub_mon: monitor_reports has ended!!\n");
+                }
+            }
 		}
 
-		// execute steps 6 and 7 
-		char* ERROR = "ERROR"; 
-		char buffer[10]; 
-
-		while(read(pipefd[0], &buffer, 5) == 5) {
-			if(strcmp(buffer, ERROR) == 0) {
-				fprintf(stderr, "ERROR: unexpected finish has occured!\n"); 
-				exit(EXIT_FAILURE); 
-			}
-		}
+	    close(pipefd[0]); 
+        waitpid(monitor_reports, NULL, 0);
+        writestr(STDOUT_FILENO, "hub_mon: monitor_reports finished for some reason....\n");
+        exit(EXIT_SUCCESS); 
 	}
 
 	else {
 		write(STDOUT_FILENO, "Parent: hub_mon has started\n"); 
-		wait(NULL); 
-		writestr(STDOUT_FILENO, "Parent: we have finished executing monitor_reports!\n"); 
 	}
 }
 
