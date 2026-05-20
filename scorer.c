@@ -70,7 +70,9 @@ int main(int argc, char* argv[]) {
 
 		if(new_inspector) {
 			pointer_scorer++; 
-			scorer[pointer_for_inspector].inspector = r.inspector; 
+			size_t inspector_size = sizeof(scorer[pointer_for_inspector].inspector); 
+			strncpy(scorer[pointer_for_inspector].inspector, r.inspector, inspector_size - 1); 
+			scorer[pointer_for_inspector].inspector[inspector_size] = '\0'; 
 		}
 
 		scorer[pointer_for_inspector].workload_score += r.severity; 
@@ -92,4 +94,6 @@ int main(int argc, char* argv[]) {
 	for(int i = 0; i < pointer_scorer; i++) {
 		printf("%s - %d\n", scorer[i].inspector, scorer[i].workload_score); 
 	}
+
+	return 0; 
 }
