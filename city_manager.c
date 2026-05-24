@@ -1093,7 +1093,7 @@ pid_t get_monitor_pid() {
     int fd = open(".monitor_pid", O_RDONLY);
 
     if(fd == -1) {
-        fprintf(stderr, "ERROR: couldn't open monitor_pid file!\n");
+        fprintf(stderr, "WARNING: couldn't open .monitor_pid file!\n");
         return UNKNOWN; 
     }
 
@@ -1101,13 +1101,13 @@ pid_t get_monitor_pid() {
 
     ssize_t bytes_read = read(fd, buffer, sizeof(buffer) - 1);
     if(bytes_read == -1) {
-        fprintf(stderr, "ERROR: couldn't read .monitor_pid!\n");
+        fprintf(stderr, "WARNING: couldn't read .monitor_pid!\n");
         close(fd);
         return UNKNOWN; 
     }
 
     if(bytes_read == 0) {
-        fprintf(stderr, "ERROR: .monitor_pid is empty!\n");
+        fprintf(stderr, "WARNING: .monitor_pid is empty!\n");
         close(fd);
         return UNKNOWN; 
     }
@@ -1121,14 +1121,14 @@ pid_t get_monitor_pid() {
     long val = strtol(buffer, &endptr, 10);
 
     if(errno == ERANGE || endptr == buffer) {
-        fprintf(stderr, "ERROR: value is too large or no numbers were found inside of .monitor_pid!\n");
+        fprintf(stderr, "WARNING: invalid value inside .monitor_pid!\n");
         return UNKNOWN;
     }
 
-
     monitor_pid = (pid_t)val; 
+
     if(monitor_pid <= 0) {
-        fprintf(stderr, "ERROR: invalid monitor PID!\n");
+        fprintf(stderr, "WARNING: invalid monitor PID!\n");
         return UNKNOWN; 
     }
 
@@ -1136,22 +1136,22 @@ pid_t get_monitor_pid() {
 }
 
 void notify_monitor(Command* cmd, pid_t monitor_pid) {
-    char message[128];
+    char message[256];
     if(monitor_pid == UNKNOWN) { 
-        snprintf(message, sizeof(message), "ERROR: don't know the monitor_pid!\n"); 
+        snprintf(message, sizeof(message), "MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid"); 
         log_monitor_notification(cmd, message);
         return; 
     }
 
     if(kill(monitor_pid, SIGUSR1) == -1) {
-        snprintf(message, sizeof(message), "ERROR: we couldn't send a SIGUSR1 to pid=%d!", monitor_pid); 
-        fprintf(stderr, "%s", message);
+        snprintf(message, sizeof(message), "MONITOR_NOTIFICATION_FAILED: couldn't send SIGUSR1 to pid=%d", (int)monitor_pid); 
+        fprintf(stderr, "%s\n", message);
 
         log_monitor_notification(cmd, message);
         return; 
     }
     
-    snprintf(message, sizeof(message), "SUCCESS:added a new district report with SIGUSR1!\n");
+    snprintf(message, sizeof(message), "MONITOR_NOTIFICATION_SUCCESS: added a new district report and sent SIGUSR1");
     log_monitor_notification(cmd, message);
 }
 

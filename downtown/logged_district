@@ -1,18 +1,19 @@
-2026-05-24 15:25:49 role=manager user=alice action=add
-2026-05-24 15:25:49 role=manager user=alice action=ERROR: don't know the monitor_pid!
-
-2026-05-24 15:35:20 role=inspector user=bob action=ERROR: don't know the monitor_pid!
-
-2026-05-24 15:35:38 role=inspector user=alice action=ERROR: don't know the monitor_pid!
-
-2026-05-24 15:37:11 role=manager user=alice action=filter
-2026-05-24 15:37:21 role=manager user=alice action=filter
-2026-05-24 15:37:34 role=manager user=alice action=remove_report
-2026-05-24 15:37:37 role=manager user=alice action=list
-2026-05-24 15:37:46 role=manager user=alice action=list
-2026-05-24 15:38:05 role=inspector user=dave action=SUCCESS:added a new district report with SIGUSR1!
-
-2026-05-24 15:38:37 role=inspector user=erin action=ERROR: don't know the monitor_pid!
-
-2026-05-24 15:40:40 role=inspector user=frank action=SUCCESS:added a new district report with SIGUSR1!
-
+2026-05-24 17:57:14 role=manager user=alice action=add
+2026-05-24 17:57:14 role=manager user=alice action=MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid
+2026-05-24 17:57:18 role=inspector user=bob action=MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid
+2026-05-24 17:57:21 role=inspector user=alice action=MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid
+2026-05-24 17:58:04 role=manager user=alice action=filter
+2026-05-24 17:58:12 role=manager user=alice action=filter
+2026-05-24 17:58:38 role=manager user=alice action=filter
+2026-05-24 17:58:41 role=manager user=alice action=filter
+2026-05-24 17:58:47 role=manager user=alice action=filter
+2026-05-24 17:59:26 role=manager user=alice action=filter
+2026-05-24 17:59:46 role=manager user=alice action=filter
+2026-05-24 17:59:50 role=manager user=alice action=filter
+2026-05-24 17:59:52 role=manager user=alice action=filter
+2026-05-24 18:00:02 role=manager user=alice action=update_threshold
+2026-05-24 18:00:12 role=manager user=alice action=remove_report
+2026-05-24 18:00:14 role=manager user=alice action=list
+2026-05-24 18:00:22 role=manager user=alice action=list
+2026-05-24 18:00:36 role=inspector user=dave action=MONITOR_NOTIFICATION_SUCCESS: added a new district report and sent SIGUSR1
+2026-05-24 18:00:57 role=inspector user=erin action=MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid

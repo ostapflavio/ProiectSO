@@ -1,5 +1,3 @@
-2026-05-24 15:41:41 role=manager user=carol action=add
-2026-05-24 15:41:41 role=manager user=carol action=ERROR: don't know the monitor_pid!
-
-2026-05-24 15:41:46 role=inspector user=bob action=ERROR: don't know the monitor_pid!
-
+2026-05-24 18:02:21 role=manager user=carol action=add
+2026-05-24 18:02:21 role=manager user=carol action=MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid
+2026-05-24 18:02:26 role=inspector user=bob action=MONITOR_NOTIFICATION_FAILED: monitor could not be informed because .monitor_pid was not found or invalid
