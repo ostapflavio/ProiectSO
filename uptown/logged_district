@@ -1,0 +1,5 @@
+2026-05-24 15:41:41 role=manager user=carol action=add
+2026-05-24 15:41:41 role=manager user=carol action=ERROR: don't know the monitor_pid!
+
+2026-05-24 15:41:46 role=inspector user=bob action=ERROR: don't know the monitor_pid!
+

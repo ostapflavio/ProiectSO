@@ -1,29 +1,27 @@
+#define _POSIX_C_SOURCE 200809L // avoid unnecessary warning, by specifying what version of POSIX functions we use
 #include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#define MAX_ARGS 64
 
 void writestr(int fd, const char *str) {
 	write(fd, str, strlen(str));
 }
 
 void run_modified_monitor() {
-	int pipefd[2]; // Stores the pipe's fds:
-		       // - pipefd[0]: read only
-		       // - pipefd[1]: write only
+	int pipefd[2];
 
-		       // 1. create a pipe
-	if (pipe(pipefd) == -1) {
+	if(pipe(pipefd) == -1) {
 		fprintf(stderr, "ERROR: pipe has failed!\n");
 		exit(EXIT_FAILURE);
 	}
 
-
-
-	// 2. create a process that will be reponsible for monitor_reports
 	pid_t monitor_reports = fork();
 
 	if(monitor_reports < 0) {
@@ -36,22 +34,14 @@ void run_modified_monitor() {
 	else if(monitor_reports == 0) {
 		close(pipefd[0]);
 
-		// 3. redirect monitor_reports OUTPUT from terminal TO THE PIPE;
-		// before that we ned to close unued pipe end
 		if(dup2(pipefd[1], STDOUT_FILENO) < 0) {
 			fprintf(stderr, "ERROR: dup2 has failed!\n");
-			exit(EXIT_FAILURE);
-		}
-		close(pipefd[1]); // now everytime we call STDOUT_FILENO,
-				  // output will be pointing to the write end of the pipe
-		int fd;
-		if((fd = open(".monitor_pid", O_RDONLY)) != -1) {
-			writestr(STDOUT_FILENO, "ERROR: this process already runs!\n");
-			close(fd);
+			close(pipefd[1]);
 			exit(EXIT_FAILURE);
 		}
 
-		// 4. if monitor_reports isn't running, run it
+		close(pipefd[1]);
+
 		execl("./monitor_reports", "./monitor_reports", NULL);
 
 		fprintf(stderr, "ERROR: execl has failed!\n");
@@ -59,8 +49,7 @@ void run_modified_monitor() {
 	}
 
 	else {
-		// 5. now, hub_mon will be monitoring for potential errors
-		close(pipefd[1]); // hub_mopn does not write anything.
+		close(pipefd[1]);
 
 		char buffer[256];
 		ssize_t n;
@@ -70,22 +59,25 @@ void run_modified_monitor() {
 
 			writestr(STDOUT_FILENO, buffer);
 
-			if(strstr(buffer, "ERROR") != NULL) {
+			if(strstr(buffer, "MONITOR_ERROR") != NULL) {
 				writestr(STDERR_FILENO, "hub_mon: monitor reported an error!\n");
 			}
 
 			if(strstr(buffer, "MONITOR_END") != NULL) {
-				writestr(STDERR_FILENO, "hub_mon: monitor_reports has ended!!\n");
+				writestr(STDERR_FILENO, "hub_mon: monitor_reports has ended!\n");
 			}
 		}
 
-		// 6. the process either finihed,
-		// either is alive BUT it doesn't print anything to STDOUT,
-		// we have reached the end of the hub_mon
 		close(pipefd[0]);
-		waitpid(monitor_reports, NULL, 0); // don't end with zombie proceses
-		writestr(STDOUT_FILENO, "hub_mon: monitor_reports finished for some reason....\n");
-		exit(EXIT_FAILURE);
+
+		int status;
+		if(waitpid(monitor_reports, &status, 0) == -1) {
+			fprintf(stderr, "ERROR: waitpid failed!\n");
+			exit(EXIT_FAILURE);
+		}
+
+		writestr(STDOUT_FILENO, "hub_mon: monitor_reports finished for some reason.\n");
+		exit(EXIT_SUCCESS);
 	}
 }
 
@@ -93,13 +85,14 @@ void start_monitor() {
 	pid_t hub_mon;
 
 	hub_mon = fork();
-	if (hub_mon < 0) {
+
+	if(hub_mon < 0) {
 		fprintf(stderr, "ERROR: couldn't start a hub_mon!\n");
 		exit(EXIT_FAILURE);
 	}
 
-	else if (hub_mon == 0) {
-		run_modified_monitor(); // it is run inside the memory space of hub_mon
+	else if(hub_mon == 0) {
+		run_modified_monitor();
 	}
 
 	else {
@@ -107,55 +100,96 @@ void start_monitor() {
 	}
 }
 
-void calculate_score(int count_of_districts, char* list_of_districts[]) {
-	int pipefd[2]; 
+int district_exists(char *district) {
+	struct stat st;
 
-	pid_t pid = fork(); 
-	if(pid < 0) {
-		fprintf(stderr, "ERROR: couldn't start a new process!\n"); 
-		exit(EXIT_FAILURE); 
-	}	
-
-	else if(pid == 0) {
-		int counter = 1; 
-		while(counter < count_of_districts) {
-			close(pipefd[0]); 
-			if(pipe(pipefd) == -1) {
-				fprintf(stderr, "ERROR: pipe has failed!\n");
-				exit(EXIT_FAILURE); 
-			}
-
-			if(dup2(pipefd[1], STDOUT_FILENO) < 0) {
-				fprintf(stderr, "ERROR: dup2 has failed!\n");
-				exit(EXIT_FAILURE);
-			}
-			close(pipefd[1]); // now everytime we call STDOUT_FILENO,
-					  // output will be pointing to the write end of the pipe
-
-			execl("./scorer", "./scorer", list_of_districts[counter++], NULL);
-			fprintf(stderr, "ERROR: exec failed!\n"); 
-			exit(EXIT_FAILURE); 
-		}
+	if(stat(district, &st) == -1) {
+		return 0;
 	}
 
-	else {
-		close(pipefd[1]); // hub_mopn does not write anything.
-		
-		writestr(STDOUT_FILENO, "SUMMARY:\n"); 
-		char buffer[256];
-		ssize_t n;
+	return S_ISDIR(st.st_mode);
+}
 
-		while((n = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
-			buffer[n] = '\0';
+void calculate_score(int count_of_districts, char* list_of_districts[]) {
+	if(count_of_districts < 2) {
+		fprintf(stderr, "ERROR: calculate_scores requires at least one district!\n");
+		return;
+	}
 
-			writestr(STDOUT_FILENO, buffer);
+	writestr(STDOUT_FILENO, "COMBINED WORKLOAD REPORT\n");
+
+	int counter = 1;
+
+	while(counter < count_of_districts) {
+		if(!district_exists(list_of_districts[counter])) {
+			fprintf(stderr, "ERROR: district doesn't exist, skipping: %s\n", list_of_districts[counter]);
+			counter++;
+			continue;
 		}
 
-		// 6. the process either finihed,
-		// either is alive BUT it doesn't print anything to STDOUT,
-		// we have reached the end of the hub_mon
-		close(pipefd[0]);
-		waitpid(pid, NULL, 0); // don't end with zombie proceses
+		int pipefd[2];
+
+		if(pipe(pipefd) == -1) {
+			fprintf(stderr, "ERROR: pipe has failed!\n");
+			exit(EXIT_FAILURE);
+		}
+
+		pid_t pid = fork();
+
+		if(pid < 0) {
+			fprintf(stderr, "ERROR: couldn't start a new process!\n");
+			close(pipefd[0]);
+			close(pipefd[1]);
+			exit(EXIT_FAILURE);
+		}
+
+		else if(pid == 0) {
+			close(pipefd[0]);
+
+			if(dup2(pipefd[1], STDOUT_FILENO) < 0) {
+				fprintf(stderr, "ERROR: dup2 failed!\n");
+				close(pipefd[1]);
+				exit(EXIT_FAILURE);
+			}
+
+			close(pipefd[1]);
+
+			execl("./scorer", "./scorer", list_of_districts[counter], NULL);
+
+			fprintf(stderr, "ERROR: exec failed!\n");
+			exit(EXIT_FAILURE);
+		}
+
+		else {
+			close(pipefd[1]);
+
+			writestr(STDOUT_FILENO, "\nDistrict: ");
+			writestr(STDOUT_FILENO, list_of_districts[counter]);
+			writestr(STDOUT_FILENO, "\n");
+
+			char buffer[256];
+			ssize_t n;
+
+			while((n = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+				buffer[n] = '\0';
+				writestr(STDOUT_FILENO, buffer);
+			}
+
+			close(pipefd[0]);
+
+			int status;
+
+			if(waitpid(pid, &status, 0) == -1) {
+				fprintf(stderr, "ERROR: waitpid failed!\n");
+				exit(EXIT_FAILURE);
+			}
+
+			if(WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+				fprintf(stderr, "ERROR: scorer failed for district: %s\n", list_of_districts[counter]);
+			}
+
+			counter++;
+		}
 	}
 }
 
@@ -163,11 +197,29 @@ void remove_newline(char *str) {
 	str[strcspn(str, "\n")] = '\0';
 }
 
-int main(int argc, char** argv) {
-	char command[256];
+int parse_command(char *command, char *args[]) {
+	int count = 0;
+
+	char *token = strtok(command, " ");
+
+	while(token != NULL && count < MAX_ARGS - 1) {
+		args[count] = token;
+		count++;
+
+		token = strtok(NULL, " ");
+	}
+
+	args[count] = NULL;
+
+	return count;
+}
+
+int main() {
+	char command[512];
+	char *args[MAX_ARGS];
 
 	writestr(STDOUT_FILENO, "city_hub started.\n");
-	writestr(STDOUT_FILENO, "Available commands: start_monitor, calculate_score, exit\n");
+	writestr(STDOUT_FILENO, "Available commands: start_monitor, calculate_scores <districts>, exit\n");
 
 	while(1) {
 		writestr(STDOUT_FILENO, "city_hub> ");
@@ -179,37 +231,33 @@ int main(int argc, char** argv) {
 
 		remove_newline(command);
 
-		if(strcmp(command, "start_monitor") == 0) {
+		int count = parse_command(command, args);
+
+		if(count == 0) {
+			continue;
+		}
+
+		if(strcmp(args[0], "start_monitor") == 0) {
 			start_monitor();
 		}
 
-		if(strcmp(command, "calculate_score") == 0) {
-			calculate_score(argc, argv); 
+		else if(strcmp(args[0], "calculate_score") == 0) {
+			calculate_score(count, args);
 		}
 
-		else if(strcmp(command, "exit") == 0 || strcmp(command, "quit") == 0) {
+		else if(strcmp(args[0], "calculate_scores") == 0) {
+			calculate_score(count, args);
+		}
+
+		else if(strcmp(args[0], "exit") == 0 || strcmp(args[0], "quit") == 0) {
 			writestr(STDOUT_FILENO, "Exiting city_hub.\n");
 			break;
-		}
-
-		else if(strlen(command) == 0) {
-			continue;
 		}
 
 		else {
 			writestr(STDERR_FILENO, "ERROR: unknown command!\n");
 		}
 	}
-}
-/*
-   start_monitor()
-   1. Create background childprocess - let's call it hub_mon 
-   2. in hub_mon, create a pipe - it reads the output from stdout  
-   3. in hub_mon, fork the monitor_reports (it must execute it)
-   4. when executed the monitor_reports, first we verify if another monitor_reports is already running 
-   5. if running, we send thorugh the pipe and error message that specifies the existing monitor's id then ends 
-   6. if it was running, the hub_mon reads from the read end, displays the message to the user as soon as available. 
-   7. if we haven't encountered an error at startup - but stil execution of the monitor has ended for any reason, print a specific message to the user 
 
-https://www.youtube.com/watch?v=hi4Yitv-M28
-*/
+	return 0;
+}
