@@ -104,3 +104,11 @@ AI didn't help me a lot during that phase, it was the internet.
 The article that helped me the most was this one [https://www.codequoi.com/en/sending-and-intercepting-a-signal-in-c/].
 
 Still it was very useful, because it gave me additional believe that my program was correct. 
+
+# Phase ALL 
+
+## How?
+I have used AI as a code reviewer and a "programming mentor", which helped me spot mistakes in my understanding and generate tests for what I had written. Sometimes AI suggested code solutions for my bugs, and when I was completely stuck, I would ask it to rewrite the code in pseudocode / plain text, so I could write it in my own style. 
+
+## Why?
+The way I used AI was to maximize productivity: I delegated routine tasks, such as generating test commands for my program, while trying to code everything in my program by myself. Sometimes, when I hit a wall, I asked about the steps to implement something, without blindly copying the code, which would have compromised the learning experience.
